@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Three.js SunLight Shadow Map</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+	</head>
+	<body>
+		<div id="info">
+		<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - Shadow Map with location-based Sun API by <a href="https://github.com/sevvaldurmazbilek">Sevval-D</a>
+		</div>
+	
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+			import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { SunLight } from 'three/addons/lights/SunLight.js';
+			import { Sky } from 'three/addons/objects/Sky.js';
+			import { ShadowMapViewer } from 'three/addons/utils/ShadowMapViewer.js';
+
+			let camera, scene, renderer, mesh, root;
+			let dirLight;
+			let dirLightShadowMapViewer;
+			let sky, sun;
+
+			init();
+			animate();
+
+			function initSky() {
+
+				sky = new Sky();
+				sky.scale.setScalar(450000);
+				scene.add(sky);
+
+				sun = new THREE.Vector3();
+
+				/// GUI
+
+				const effectController = {
+					turbidity: 10,
+					rayleigh: 3,
+					mieCoefficient: 0.005,
+					mieDirectionalG: 0.7,
+					elevation: 2,
+					azimuth: 180,
+					exposure: renderer.toneMappingExposure
+				};
+
+				function guiChanged() {
+
+					const uniforms = sky.material.uniforms;
+					uniforms[ 'turbidity' ].value = effectController.turbidity;
+					uniforms[ 'rayleigh' ].value = effectController.rayleigh;
+					uniforms[ 'mieCoefficient' ].value = effectController.mieCoefficient;
+					uniforms[ 'mieDirectionalG' ].value = effectController.mieDirectionalG;
+					
+
+					const phi = THREE.MathUtils.degToRad( 90 - effectController.elevation );
+					const theta = THREE.MathUtils.degToRad( effectController.azimuth );
+
+					sun.setFromSphericalCoords( 1, phi, theta );
+
+					uniforms[ 'sunPosition' ].value.copy( sun );
+
+					renderer.toneMappingExposure = effectController.exposure;
+					renderer.render( scene, camera );
+
+				}
+
+				const gui = new GUI();
+
+				gui.add( effectController, 'turbidity', 0.0, 20.0, 0.1 ).onChange( guiChanged );
+				gui.add( effectController, 'rayleigh', 0.0, 4, 0.001 ).onChange( guiChanged );
+				gui.add( effectController, 'mieCoefficient', 0.0, 0.1, 0.001 ).onChange( guiChanged );
+				gui.add( effectController, 'mieDirectionalG', 0.0, 1, 0.001 ).onChange( guiChanged );
+				gui.add( effectController, 'elevation', 0, 90, 0.1 ).onChange( guiChanged );
+				gui.add( effectController, 'azimuth', - 180, 180, 0.1 ).onChange( guiChanged );
+				gui.add( effectController, 'exposure', 0, 1, 0.0001 ).onChange( guiChanged );
+				
+				guiChanged();
+
+			}
+
+
+			function init() {
+
+				initScene();
+				initShadowMapViewers();
+				initMisc();
+				initSky();
+
+				document.body.appendChild( renderer.domElement );
+				window.addEventListener( 'resize', onWindowResize );
+
+			}
+
+			function initScene() {
+
+				camera = new THREE.PerspectiveCamera( 
+					75, 
+					window.innerWidth / window.innerHeight, 
+					0.1, 
+					2000 
+				);
+
+				camera.position.x= 0.0;
+				camera.position.y= 450.0;
+				camera.position.z= 450.0;
+				
+				scene = new THREE.Scene();
+				root = new THREE.Object3D();
+				scene.add( root );
+
+				// Lights
+
+				scene.add( new THREE.AmbientLight( 0x404040 ) );
+
+				var sunLight = new SunLight(
+					//Oulu
+					new THREE.Vector2( 48.1375, 11.575 ),
+					new THREE.Vector3( 0.0, 0.0, -1.0 ),
+					new THREE.Vector3( 1.0, 0.0, 0.0 ),
+					//new THREE.Vector3( 0.0, 0.0, 1.0 ),
+					//new THREE.Vector3( -1.0, 0.0, 0.0 ),
+					new THREE.Vector3( 0.0, -1.0, 0.0 ),
+				);
+				root.add(sunLight);
+
+
+				/// GUI
+
+				const effectController = {
+					month: 3,
+					day: 13,
+					hour: 10,
+					minute: 0
+				};
+
+				function guiChanged() {
+					
+					const month = effectController.month;
+					const day = effectController.day;
+					const hour = effectController.hour;
+					const minute = effectController.minute;
+					sunLight.localDate = new Date(2023, month, day, hour, minute, 0, 0);
+					sunLight.updateOrientation(false);
+					sunLight.updateDirectionalLight();
+					//renderer.render( scene, camera );
+				}
+
+				const gui = new GUI();
+
+				gui.add( effectController, 'month', 1, 12, 1).onChange( guiChanged );
+				gui.add( effectController, 'day', 1, 31, 1).onChange( guiChanged );
+				gui.add( effectController, 'hour', 0, 24, 1).onChange( guiChanged );
+				gui.add( effectController, 'minute', 0, 60, 10).onChange( guiChanged );
+				guiChanged();
+
+				//sunLight.updateOrientation(false);
+				//sunLight.updateDirectionalLight();
+
+				sunLight.directionalLight.shadow.camera.right = 1500.0; //add sunLight. 
+				sunLight.directionalLight.shadow.camera.left = -1500.0;
+				sunLight.directionalLight.shadow.camera.top = 1500.0;
+				sunLight.directionalLight.shadow.camera.bottom = -1500.0;
+
+				sunLight.directionalLight.shadow.camera.near = -1500.0; 
+				sunLight.directionalLight.shadow.camera.far = 1500.0; 
+				sunLight.directionalLight.shadow.bias = 0.0001;
+
+				sunLight.directionalLight.shadow.mapSize.width = 1024;
+				sunLight.directionalLight.shadow.mapSize.height = 1024;
+
+				dirLight = sunLight.directionalLight;
+				dirLight.name = 'Shadows';
+				scene.add( dirLight.shadow );
+
+
+				// Geometry
+
+				const ground = createBox( 3500.0, 1.0, 3500.0, 0xa0adaf );
+				ground.scale.multiplyScalar( 1 );
+				ground.position.set( 0.0, -32.0, 0.0 );
+				ground.castShadow = false;
+				ground.receiveShadow = true;
+				root.add( ground );
+				
+				var Material = new THREE.MeshPhongMaterial({
+					color:0xffffff,
+					specular: 0x111111,
+					shininess : 100
+				});
+
+				const loader = new GLTFLoader;
+				loader.load('./models/gltf/Building_690_5336.gltf', function(gltf) {
+					gltf.scene.rotation.x = - Math.PI/2;
+					mesh = gltf.scene.children[0];
+					mesh.Material = new THREE.Mesh();
+					mesh.castShadow = true;
+					mesh.receiveShadow = true;
+					scene.add(gltf.scene);
+					render();
+				})
+			}
+
+			function initShadowMapViewers() {
+
+				dirLightShadowMapViewer = new ShadowMapViewer( dirLight );
+				resizeShadowMapViewers();
+
+			}
+
+			function initMisc() {
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.shadowMap.enabled = true;
+	
+
+				renderer.outputEncoding = THREE.sRGBEncoding;
+				renderer.toneMapping = THREE.ACESFilmicToneMapping;
+				renderer.toneMappingExposure = 0.5;
+
+				// Mouse control
+				const controls = new OrbitControls( camera, renderer.domElement );
+				controls.target.set( 0, 2, 0 );
+				controls.update();
+
+			}
+
+			function resizeShadowMapViewers() {
+
+				const size = window.innerWidth * 0.20;
+
+				dirLightShadowMapViewer.position.x = 10;
+				dirLightShadowMapViewer.position.y = 10;
+				dirLightShadowMapViewer.size.width = size;
+				dirLightShadowMapViewer.size.height = size;
+				dirLightShadowMapViewer.update(); 	
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				resizeShadowMapViewers();
+				dirLightShadowMapViewer.updateForWindowResize();
+
+			}
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+				render();
+
+
+			}
+
+			function renderScene() {
+
+				renderer.render( scene, camera );
+
+			}
+
+			function renderShadowMapViewers() {
+
+				dirLightShadowMapViewer.render( renderer );	
+
+			}
+
+			function render() {
+
+				renderScene();
+				renderShadowMapViewers();
+
+			}
+
+			function createBox ( width_, height_, depth_, color_ = 0xffffff ) {
+				var geometry = new THREE.BoxGeometry( width_, height_, depth_ );
+				var material = new THREE.MeshPhongMaterial( { color: color_ } );
+				var cube = new THREE.Mesh( geometry, material );
+				cube.castShadow = false;
+				cube.receiveShadow = true;
+				return cube;
+			}
+
+		</script>
+	</body>
+</html>
